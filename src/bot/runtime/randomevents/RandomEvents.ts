@@ -32,6 +32,18 @@ export function pickEventNear(npc: { name: string | null; distance: number }): b
     const name = npc.name?.toLowerCase();
     return name !== undefined && PICK_EVENT_NPCS.includes(name) && npc.distance <= PLANT_REACH;
 }
+
+/** FACE_ENTITY values at or above this are a player slot; below it they are an npc index. */
+const FACE_ENTITY_PLAYER = 32768;
+
+// Why: a talking random follows the player it spawned for, so its FACE_ENTITY names that player and a Talk-to from anyone else only draws "Sorry, but I'm trying to talk to another player".
+/** Whether this event npc is following a player who is not us. An absent facing or an unknown slot of our own stays ours, since abandoning our own event runs it down to its fail teleport. */
+export function eventNpcTargetsAnotherPlayer(npc: { faceEntity: number }, selfSlot: number): boolean {
+    return selfSlot >= 0
+        && npc.faceEntity >= FACE_ENTITY_PLAYER
+        && npc.faceEntity - FACE_ENTITY_PLAYER !== selfSlot;
+}
+
 const idRange = (lo: number, hi: number): number[] => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
 const HOSTILE_EVENT_NPC_IDS = new Set<number>([
     ...idRange(391, 396), // River troll  (macro_rivertrollguardian_1..6)
@@ -310,12 +322,13 @@ class RandomEventsImpl {
             BotHost.tickCount
         );
 
+        const selfSlot = reader.selfSlot();
         for (const npc of npcs) {
             const name = npc.name?.toLowerCase();
             if (!name) {
                 continue;
             }
-            if (DIALOG_EVENT_NPCS.includes(name) && npc.distance <= 6) {
+            if (DIALOG_EVENT_NPCS.includes(name) && npc.distance <= 6 && !eventNpcTargetsAnotherPlayer(npc, selfSlot)) {
                 return { kind: 'dialog', name };
             }
             if (pickEventNear(npc) && plantStrategy(npc.ops) === 'pick') {

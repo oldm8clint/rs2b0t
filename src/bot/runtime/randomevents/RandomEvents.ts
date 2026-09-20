@@ -1,4 +1,4 @@
-import { reader } from '../../adapter/ClientAdapter.js';
+import { reader, type WorldTile } from '../../adapter/ClientAdapter.js';
 import { BotHost } from '../BotHost.js';
 import { EventSignal } from '../../api/execution/EventSignal.js';
 import { Execution } from '../../api/execution/Execution.js';
@@ -61,6 +61,8 @@ const GAS_CHEST_LOC_ID = 2141;
 const WHIRLPOOL_NPC_IDS = [403, 404, 405, 406];
 const SMOKING_ROCK_ID_MIN = 2119;
 const SMOKING_ROCK_ID_MAX = 2138;
+/** How far to step off a hazard: gas damages the tile beside it and a whirlpool only takes gear from a re-click. */
+export const HAZARD_STEP = 4;
 const FISHING_GEAR = [
     'small fishing net',
     'big fishing net',
@@ -149,6 +151,8 @@ type EventKind =
 interface DetectedEvent {
     kind: EventKind;
     name: string;
+    /** Where a hazard stands, so the step off it goes the other way. */
+    tile?: WorldTile;
 }
 
 const MAX_ATTEMPTS = 4; // bounded retries before the script resumes
@@ -358,15 +362,15 @@ class RandomEventsImpl {
 
         for (const loc of reader.locs()) {
             if (loc.id === GAS_CHEST_LOC_ID && loc.distance <= 1) {
-                return { kind: 'hazard', name: 'poisonous gas' };
+                return { kind: 'hazard', name: 'poisonous gas', tile: loc.tile };
             }
             if (loc.id >= SMOKING_ROCK_ID_MIN && loc.id <= SMOKING_ROCK_ID_MAX && loc.distance <= 2) {
-                return { kind: 'hazard', name: 'smoking rock' };
+                return { kind: 'hazard', name: 'smoking rock', tile: loc.tile };
             }
         }
         for (const npc of npcs) {
             if (WHIRLPOOL_NPC_IDS.includes(npc.id) && npc.distance <= 3) {
-                return { kind: 'hazard', name: 'whirlpool' };
+                return { kind: 'hazard', name: 'whirlpool', tile: npc.tile };
             }
         }
 
@@ -438,7 +442,7 @@ class RandomEventsImpl {
                 acted = await this.handleEvade(event.name, log);
                 break;
             case 'hazard':
-                acted = await this.handleHazard(event.name, log);
+                acted = await this.handleHazard(event.name, event.tile, log);
                 break;
             case 'hijack':
                 acted = await this.handleHijack(log);
@@ -600,13 +604,14 @@ class RandomEventsImpl {
         return true;
     }
 
-    private async handleHazard(name: string, log: (msg: string) => void): Promise<boolean> {
+    // Why: with our own tile as the threat every candidate sits the same distance away, so the sort is a no-op and the first reachable compass tile can land beside the hazard we are leaving.
+    private async handleHazard(name: string, at: WorldTile | undefined, log: (msg: string) => void): Promise<boolean> {
         const me = Game.tile();
         if (!me) {
             return false;
         }
         log(`random event: ${name} — stepping away`);
-        const flee = fleeCandidates(me, me, 4).find(t => Reachability.canReach(t, { maxSteps: 600 }));
+        const flee = fleeCandidates(me, at ?? me, HAZARD_STEP).find(t => Reachability.canReach(t, { maxSteps: 600 }));
         if (flee) {
             await Traversal.walkTo(flee, { radius: 1, timeoutMs: 15_000, log });
         }

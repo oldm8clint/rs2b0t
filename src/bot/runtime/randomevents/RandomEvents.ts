@@ -486,7 +486,6 @@ class RandomEventsImpl {
         log(`random event: ${name} — talking through it`);
         const npc = Npcs.query()
             .where(n => (n.name?.toLowerCase() ?? '') === name)
-            .where(n => !eventNpcTargetsAnotherPlayer(n.snap, reader.selfSlot()))
             .nearest();
         if (!npc) {
             return false;
